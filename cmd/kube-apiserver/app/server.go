@@ -114,21 +114,22 @@ cluster's shared state through which all other components interact.`,
 		// stop printing usage when the command errors
 		SilenceUsage: true,
 		PersistentPreRunE: func(*cobra.Command, []string) error {
-			// silence client-go warnings.
+			// silence client-go warnings. 静默client-go的warning信息
 			// kube-apiserver loopback clients should not log self-issued warnings.
+			// 关闭 handler 警告
 			rest.SetDefaultWarningHandler(rest.NoWarnings{})
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			verflag.PrintAndExitIfRequested()
+			verflag.PrintAndExitIfRequested() // 输入 -version 时进行拦截
 			fs := cmd.Flags()
-			cliflag.PrintFlags(fs)
+			cliflag.PrintFlags(fs) // 打印参数
 
-			err := checkNonZeroInsecurePort(fs)
+			err := checkNonZeroInsecurePort(fs) // 检查端口是否传递
 			if err != nil {
 				return err
 			}
-			// set default options
+			// set default options 默认传参
 			completedOptions, err := Complete(s)
 			if err != nil {
 				return err
@@ -178,7 +179,7 @@ cluster's shared state through which all other components interact.`,
 // Run runs the specified APIServer.  This should never exit.
 func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) error {
 	// To help debugging, immediately log version
-	klog.Infof("Version: %+v", version.Get())
+	klog.Infof("Version: %+v", version.Get()) // 版本信息
 
 	server, err := CreateServerChain(completeOptions, stopCh)
 	if err != nil {
