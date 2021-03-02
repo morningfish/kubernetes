@@ -92,11 +92,23 @@ func VisitContainers(podSpec *api.PodSpec, mask ContainerType, visitor Container
 // Visitor is called with each object name, and returns true if visiting should continue
 type Visitor func(name string) (shouldContinue bool)
 
+func skipEmptyNames(visitor Visitor) Visitor {
+	return func(name string) bool {
+		if len(name) == 0 {
+			// continue visiting
+			return true
+		}
+		// delegate to visitor
+		return visitor(name)
+	}
+}
+
 // VisitPodSecretNames invokes the visitor function with the name of every secret
 // referenced by the pod spec. If visitor returns false, visiting is short-circuited.
 // Transitive references (e.g. pod -> pvc -> pv -> secret) are not visited.
 // Returns true if visiting completed, false if visiting was short-circuited.
 func VisitPodSecretNames(pod *api.Pod, visitor Visitor, containerType ContainerType) bool {
+	visitor = skipEmptyNames(visitor)
 	for _, reference := range pod.Spec.ImagePullSecrets {
 		if !visitor(reference.Name) {
 			return false
@@ -185,6 +197,7 @@ func visitContainerSecretNames(container *api.Container, visitor Visitor) bool {
 // Transitive references (e.g. pod -> pvc -> pv -> secret) are not visited.
 // Returns true if visiting completed, false if visiting was short-circuited.
 func VisitPodConfigmapNames(pod *api.Pod, visitor Visitor, containerType ContainerType) bool {
+	visitor = skipEmptyNames(visitor)
 	VisitContainers(&pod.Spec, containerType, func(c *api.Container, containerType ContainerType) bool {
 		return visitContainerConfigmapNames(c, visitor)
 	})
@@ -332,29 +345,34 @@ func usesMultipleHugePageResources(podSpec *api.PodSpec) bool {
 	return len(hugePageResources) > 1
 }
 
-// GetValidationOptionsFromPodSpec returns validation options based on pod specs
-func GetValidationOptionsFromPodSpec(podSpec, oldPodSpec *api.PodSpec) apivalidation.PodValidationOptions {
+// GetValidationOptionsFromPodSpecAndMeta returns validation options based on pod specs and metadata
+func GetValidationOptionsFromPodSpecAndMeta(podSpec, oldPodSpec *api.PodSpec, podMeta, oldPodMeta *metav1.ObjectMeta) apivalidation.PodValidationOptions {
 	// default pod validation options based on feature gate
 	opts := validation.PodValidationOptions{
 		// Allow multiple huge pages on pod create if feature is enabled
 		AllowMultipleHugePageResources: utilfeature.DefaultFeatureGate.Enabled(features.HugePageStorageMediumSize),
 		// Allow pod spec to use hugepages in downward API if feature is enabled
-		AllowDownwardAPIHugePages: utilfeature.DefaultFeatureGate.Enabled(features.DownwardAPIHugePages),
+		AllowDownwardAPIHugePages:   utilfeature.DefaultFeatureGate.Enabled(features.DownwardAPIHugePages),
+		AllowInvalidPodDeletionCost: !utilfeature.DefaultFeatureGate.Enabled(features.PodDeletionCost),
 	}
-	// if we are not doing an update operation, just return with default options
-	if oldPodSpec == nil {
-		return opts
+
+	if oldPodSpec != nil {
+		// if old spec used multiple huge page sizes, we must allow it
+		opts.AllowMultipleHugePageResources = opts.AllowMultipleHugePageResources || usesMultipleHugePageResources(oldPodSpec)
+		// if old spec used hugepages in downward api, we must allow it
+		opts.AllowDownwardAPIHugePages = opts.AllowDownwardAPIHugePages || usesHugePagesInProjectedVolume(oldPodSpec)
+		// determine if any container is using hugepages in env var
+		if !opts.AllowDownwardAPIHugePages {
+			VisitContainers(oldPodSpec, AllContainers, func(c *api.Container, containerType ContainerType) bool {
+				opts.AllowDownwardAPIHugePages = opts.AllowDownwardAPIHugePages || usesHugePagesInProjectedEnv(*c)
+				return !opts.AllowDownwardAPIHugePages
+			})
+		}
 	}
-	// if old spec used multiple huge page sizes, we must allow it
-	opts.AllowMultipleHugePageResources = opts.AllowMultipleHugePageResources || usesMultipleHugePageResources(oldPodSpec)
-	// if old spec used hugepages in downward api, we must allow it
-	opts.AllowDownwardAPIHugePages = opts.AllowDownwardAPIHugePages || usesHugePagesInProjectedVolume(oldPodSpec)
-	// determine if any container is using hugepages in env var
-	if !opts.AllowDownwardAPIHugePages {
-		VisitContainers(oldPodSpec, AllContainers, func(c *api.Container, containerType ContainerType) bool {
-			opts.AllowDownwardAPIHugePages = opts.AllowDownwardAPIHugePages || usesHugePagesInProjectedEnv(*c)
-			return !opts.AllowDownwardAPIHugePages
-		})
+	if oldPodMeta != nil && !opts.AllowInvalidPodDeletionCost {
+		// This is an update, so validate only if the existing object was valid.
+		_, err := helper.GetDeletionCostFromPodAnnotations(oldPodMeta.Annotations)
+		opts.AllowInvalidPodDeletionCost = err != nil
 	}
 	return opts
 }
@@ -362,15 +380,18 @@ func GetValidationOptionsFromPodSpec(podSpec, oldPodSpec *api.PodSpec) apivalida
 // GetValidationOptionsFromPodTemplate will return pod validation options for specified template.
 func GetValidationOptionsFromPodTemplate(podTemplate, oldPodTemplate *api.PodTemplateSpec) apivalidation.PodValidationOptions {
 	var newPodSpec, oldPodSpec *api.PodSpec
+	var newPodMeta, oldPodMeta *metav1.ObjectMeta
 	// we have to be careful about nil pointers here
 	// replication controller in particular is prone to passing nil
 	if podTemplate != nil {
 		newPodSpec = &podTemplate.Spec
+		newPodMeta = &podTemplate.ObjectMeta
 	}
 	if oldPodTemplate != nil {
 		oldPodSpec = &oldPodTemplate.Spec
+		oldPodMeta = &oldPodTemplate.ObjectMeta
 	}
-	return GetValidationOptionsFromPodSpec(newPodSpec, oldPodSpec)
+	return GetValidationOptionsFromPodSpecAndMeta(newPodSpec, oldPodSpec, newPodMeta, oldPodMeta)
 }
 
 // DropDisabledTemplateFields removes disabled fields from the pod template metadata and spec.
