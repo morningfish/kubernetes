@@ -69,10 +69,10 @@ func ListAlgorithmProviders() string {
 }
 
 func getDefaultConfig() *schedulerapi.Plugins {
-	return &schedulerapi.Plugins{
+	return &schedulerapi.Plugins{ // 默认的调度算法
 		QueueSort: schedulerapi.PluginSet{
 			Enabled: []schedulerapi.Plugin{
-				{Name: queuesort.Name},
+				{Name: queuesort.Name}, // 有序队列
 			},
 		},
 		PreFilter: schedulerapi.PluginSet{

@@ -232,7 +232,7 @@ func New(client clientset.Interface,
 	var sched *Scheduler
 	source := options.schedulerAlgorithmSource
 	switch {
-	case source.Provider != nil:
+	case source.Provider != nil: // 默认算法
 		// Create the config from a named algorithm provider.
 		sc, err := configurator.createFromProvider(*source.Provider)
 		if err != nil {
