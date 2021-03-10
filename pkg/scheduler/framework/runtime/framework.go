@@ -60,6 +60,16 @@ const (
 	permit                      = "Permit"
 )
 
+var allClusterEvents = []framework.ClusterEvent{
+	{Resource: framework.Pod, ActionType: framework.All},
+	{Resource: framework.Node, ActionType: framework.All},
+	{Resource: framework.CSINode, ActionType: framework.All},
+	{Resource: framework.PersistentVolume, ActionType: framework.All},
+	{Resource: framework.PersistentVolumeClaim, ActionType: framework.All},
+	{Resource: framework.Service, ActionType: framework.All},
+	{Resource: framework.StorageClass, ActionType: framework.All},
+}
+
 var configDecoder = scheme.Codecs.UniversalDecoder()
 
 // frameworkImpl is the component responsible for initializing and running scheduler
@@ -90,6 +100,8 @@ type frameworkImpl struct {
 
 	extenders []framework.Extender
 	framework.PodNominator
+
+	parallelizer parallelize.Parallelizer
 
 	// Indicates that RunFilterPlugins should accumulate all failed statuses and not return
 	// after the first failure.
@@ -134,11 +146,12 @@ type frameworkOptions struct {
 	informerFactory      informers.SharedInformerFactory
 	snapshotSharedLister framework.SharedLister
 	metricsRecorder      *metricsRecorder
-	profileName          string
 	podNominator         framework.PodNominator
 	extenders            []framework.Extender
 	runAllFilters        bool
 	captureProfile       CaptureProfile
+	clusterEventMap      map[framework.ClusterEvent]sets.String
+	parallelizer         parallelize.Parallelizer
 }
 
 // Option for the frameworkImpl.
@@ -180,20 +193,6 @@ func WithRunAllFilters(runAllFilters bool) Option {
 	}
 }
 
-// WithProfileName sets the profile name.
-func WithProfileName(name string) Option {
-	return func(o *frameworkOptions) {
-		o.profileName = name
-	}
-}
-
-// withMetricsRecorder is only used in tests.
-func withMetricsRecorder(recorder *metricsRecorder) Option {
-	return func(o *frameworkOptions) {
-		o.metricsRecorder = recorder
-	}
-}
-
 // WithPodNominator sets podNominator for the scheduling frameworkImpl.
 func WithPodNominator(nominator framework.PodNominator) Option {
 	return func(o *frameworkOptions) {
@@ -205,6 +204,13 @@ func WithPodNominator(nominator framework.PodNominator) Option {
 func WithExtenders(extenders []framework.Extender) Option {
 	return func(o *frameworkOptions) {
 		o.extenders = extenders
+	}
+}
+
+// WithParallelism sets parallelism for the scheduling frameworkImpl.
+func WithParallelism(parallelism int) Option {
+	return func(o *frameworkOptions) {
+		o.parallelizer = parallelize.NewParallelizer(parallelism)
 	}
 }
 
@@ -221,13 +227,22 @@ func WithCaptureProfile(c CaptureProfile) Option {
 func defaultFrameworkOptions() frameworkOptions {
 	return frameworkOptions{
 		metricsRecorder: newMetricsRecorder(1000, time.Second),
+		clusterEventMap: make(map[framework.ClusterEvent]sets.String),
+		parallelizer:    parallelize.NewParallelizer(parallelize.DefaultParallelism),
+	}
+}
+
+// WithClusterEventMap sets clusterEventMap for the scheduling frameworkImpl.
+func WithClusterEventMap(m map[framework.ClusterEvent]sets.String) Option {
+	return func(o *frameworkOptions) {
+		o.clusterEventMap = m
 	}
 }
 
 var _ framework.Framework = &frameworkImpl{}
 
 // NewFramework initializes plugins given the configuration and the registry.
-func NewFramework(r Registry, plugins *config.Plugins, args []config.PluginConfig, opts ...Option) (framework.Framework, error) {
+func NewFramework(r Registry, profile *config.KubeSchedulerProfile, opts ...Option) (framework.Framework, error) {
 	options := defaultFrameworkOptions()
 	for _, opt := range opts {
 		opt(&options)
@@ -242,29 +257,35 @@ func NewFramework(r Registry, plugins *config.Plugins, args []config.PluginConfi
 		eventRecorder:         options.eventRecorder,
 		informerFactory:       options.informerFactory,
 		metricsRecorder:       options.metricsRecorder,
-		profileName:           options.profileName,
 		runAllFilters:         options.runAllFilters,
 		extenders:             options.extenders,
 		PodNominator:          options.podNominator,
+		parallelizer:          options.parallelizer,
 	}
-	if plugins == nil {
+
+	if profile == nil {
+		return f, nil
+	}
+
+	f.profileName = profile.SchedulerName
+	if profile.Plugins == nil {
 		return f, nil
 	}
 
 	// get needed plugins from config
-	pg := f.pluginsNeeded(plugins)
+	pg := f.pluginsNeeded(profile.Plugins)
 
-	pluginConfig := make(map[string]runtime.Object, len(args))
-	for i := range args {
-		name := args[i].Name
+	pluginConfig := make(map[string]runtime.Object, len(profile.PluginConfig))
+	for i := range profile.PluginConfig {
+		name := profile.PluginConfig[i].Name
 		if _, ok := pluginConfig[name]; ok {
 			return nil, fmt.Errorf("repeated config for plugin %s", name)
 		}
-		pluginConfig[name] = args[i].Args
+		pluginConfig[name] = profile.PluginConfig[i].Args
 	}
 	outputProfile := config.KubeSchedulerProfile{
 		SchedulerName: f.profileName,
-		Plugins:       plugins,
+		Plugins:       profile.Plugins,
 		PluginConfig:  make([]config.PluginConfig, 0, len(pg)),
 	}
 
@@ -292,6 +313,9 @@ func NewFramework(r Registry, plugins *config.Plugins, args []config.PluginConfi
 		}
 		pluginsMap[name] = p
 
+		// Update ClusterEventMap in place.
+		fillEventToPluginMap(p, options.clusterEventMap)
+
 		// a weight of zero is not permitted, plugins can be disabled explicitly
 		// when configured.
 		f.pluginNameToWeightMap[name] = int(pg[name].Weight)
@@ -305,7 +329,7 @@ func NewFramework(r Registry, plugins *config.Plugins, args []config.PluginConfi
 		totalPriority += int64(f.pluginNameToWeightMap[name]) * framework.MaxNodeScore
 	}
 
-	for _, e := range f.getExtensionPoints(plugins) {
+	for _, e := range f.getExtensionPoints(profile.Plugins) {
 		if err := updatePluginList(e.slicePtr, e.plugins, pluginsMap); err != nil {
 			return nil, err
 		}
@@ -341,6 +365,37 @@ func NewFramework(r Registry, plugins *config.Plugins, args []config.PluginConfi
 	}
 
 	return f, nil
+}
+
+func fillEventToPluginMap(p framework.Plugin, eventToPlugins map[framework.ClusterEvent]sets.String) {
+	ext, ok := p.(framework.EnqueueExtensions)
+	if !ok {
+		// If interface EnqueueExtensions is not implemented, register the default events
+		// to the plugin. This is to ensure backward compatibility.
+		registerClusterEvents(p.Name(), eventToPlugins, allClusterEvents)
+		return
+	}
+
+	events := ext.EventsToRegister()
+	// It's rare that a plugin implements EnqueueExtensions but returns nil.
+	// We treat it as: the plugin is not interested in any event, and hence pod failed by that plugin
+	// cannot be moved by any regular cluster event.
+	if len(events) == 0 {
+		klog.InfoS("Plugin's EventsToRegister() returned nil", "plugin", p.Name())
+		return
+	}
+	// The most common case: a plugin implements EnqueueExtensions and returns non-nil result.
+	registerClusterEvents(p.Name(), eventToPlugins, events)
+}
+
+func registerClusterEvents(name string, eventToPlugins map[framework.ClusterEvent]sets.String, evts []framework.ClusterEvent) {
+	for _, evt := range evts {
+		if eventToPlugins[evt] == nil {
+			eventToPlugins[evt] = sets.NewString(name)
+		} else {
+			eventToPlugins[evt].Insert(name)
+		}
+	}
 }
 
 // getPluginArgsOrDefault returns a configuration provided by the user or builds
@@ -714,7 +769,7 @@ func (f *frameworkImpl) RunScorePlugins(ctx context.Context, state *framework.Cy
 	errCh := parallelize.NewErrorChannel()
 
 	// Run Score method for each node in parallel.
-	parallelize.Until(ctx, len(nodes), func(index int) {
+	f.Parallelizer().Until(ctx, len(nodes), func(index int) {
 		for _, pl := range f.scorePlugins {
 			nodeName := nodes[index].Name
 			s, status := f.runScorePlugin(ctx, pl, state, pod, nodeName)
@@ -734,7 +789,7 @@ func (f *frameworkImpl) RunScorePlugins(ctx context.Context, state *framework.Cy
 	}
 
 	// Run NormalizeScore method for each ScorePlugin in parallel.
-	parallelize.Until(ctx, len(f.scorePlugins), func(index int) {
+	f.Parallelizer().Until(ctx, len(f.scorePlugins), func(index int) {
 		pl := f.scorePlugins[index]
 		nodeScoreList := pluginToNodeScores[pl.Name()]
 		if pl.ScoreExtensions() == nil {
@@ -752,7 +807,7 @@ func (f *frameworkImpl) RunScorePlugins(ctx context.Context, state *framework.Cy
 	}
 
 	// Apply score defaultWeights for each ScorePlugin in parallel.
-	parallelize.Until(ctx, len(f.scorePlugins), func(index int) {
+	f.Parallelizer().Until(ctx, len(f.scorePlugins), func(index int) {
 		pl := f.scorePlugins[index]
 		// Score plugins' weight has been checked when they are initialized.
 		weight := f.pluginNameToWeightMap[pl.Name()]
@@ -1125,4 +1180,9 @@ func (f *frameworkImpl) pluginsNeeded(plugins *config.Plugins) map[string]config
 // ProfileName returns the profile name associated to this framework.
 func (f *frameworkImpl) ProfileName() string {
 	return f.profileName
+}
+
+// Parallelizer returns a parallelizer holding parallelism for scheduler.
+func (f *frameworkImpl) Parallelizer() parallelize.Parallelizer {
+	return f.parallelizer
 }

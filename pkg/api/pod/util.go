@@ -345,6 +345,52 @@ func usesMultipleHugePageResources(podSpec *api.PodSpec) bool {
 	return len(hugePageResources) > 1
 }
 
+func checkContainerUseIndivisibleHugePagesValues(container api.Container) bool {
+	for resourceName, quantity := range container.Resources.Limits {
+		if helper.IsHugePageResourceName(resourceName) {
+			if !helper.IsHugePageResourceValueDivisible(resourceName, quantity) {
+				return true
+			}
+		}
+	}
+
+	for resourceName, quantity := range container.Resources.Requests {
+		if helper.IsHugePageResourceName(resourceName) {
+			if !helper.IsHugePageResourceValueDivisible(resourceName, quantity) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// usesIndivisibleHugePagesValues returns true if the one of the containers uses non-integer multiple
+// of huge page unit size
+func usesIndivisibleHugePagesValues(podSpec *api.PodSpec) bool {
+	foundIndivisibleHugePagesValue := false
+	VisitContainers(podSpec, AllContainers, func(c *api.Container, containerType ContainerType) bool {
+		if checkContainerUseIndivisibleHugePagesValues(*c) {
+			foundIndivisibleHugePagesValue = true
+		}
+		return !foundIndivisibleHugePagesValue // continue visiting if we haven't seen an invalid value yet
+	})
+
+	if foundIndivisibleHugePagesValue {
+		return true
+	}
+
+	for resourceName, quantity := range podSpec.Overhead {
+		if helper.IsHugePageResourceName(resourceName) {
+			if !helper.IsHugePageResourceValueDivisible(resourceName, quantity) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // GetValidationOptionsFromPodSpecAndMeta returns validation options based on pod specs and metadata
 func GetValidationOptionsFromPodSpecAndMeta(podSpec, oldPodSpec *api.PodSpec, podMeta, oldPodMeta *metav1.ObjectMeta) apivalidation.PodValidationOptions {
 	// default pod validation options based on feature gate
@@ -354,6 +400,8 @@ func GetValidationOptionsFromPodSpecAndMeta(podSpec, oldPodSpec *api.PodSpec, po
 		// Allow pod spec to use hugepages in downward API if feature is enabled
 		AllowDownwardAPIHugePages:   utilfeature.DefaultFeatureGate.Enabled(features.DownwardAPIHugePages),
 		AllowInvalidPodDeletionCost: !utilfeature.DefaultFeatureGate.Enabled(features.PodDeletionCost),
+		// Do not allow pod spec to use non-integer multiple of huge page unit size default
+		AllowIndivisibleHugePagesValues: false,
 	}
 
 	if oldPodSpec != nil {
@@ -368,12 +416,16 @@ func GetValidationOptionsFromPodSpecAndMeta(podSpec, oldPodSpec *api.PodSpec, po
 				return !opts.AllowDownwardAPIHugePages
 			})
 		}
+
+		// if old spec used non-integer multiple of huge page unit size, we must allow it
+		opts.AllowIndivisibleHugePagesValues = usesIndivisibleHugePagesValues(oldPodSpec)
 	}
 	if oldPodMeta != nil && !opts.AllowInvalidPodDeletionCost {
 		// This is an update, so validate only if the existing object was valid.
 		_, err := helper.GetDeletionCostFromPodAnnotations(oldPodMeta.Annotations)
 		opts.AllowInvalidPodDeletionCost = err != nil
 	}
+
 	return opts
 }
 
@@ -523,6 +575,7 @@ func dropDisabledFields(
 		podSpec.SetHostnameAsFQDN = nil
 	}
 
+	dropDisabledPodAffinityTermFields(podSpec, oldPodSpec)
 }
 
 // dropDisabledProcMountField removes disabled fields from PodSpec related
@@ -565,11 +618,71 @@ func dropDisabledCSIVolumeSourceAlphaFields(podSpec, oldPodSpec *api.PodSpec) {
 // dropDisabledEphemeralVolumeSourceAlphaFields removes disabled alpha fields from []EphemeralVolumeSource.
 // This should be called from PrepareForCreate/PrepareForUpdate for all pod specs resources containing a EphemeralVolumeSource
 func dropDisabledEphemeralVolumeSourceAlphaFields(podSpec, oldPodSpec *api.PodSpec) {
-	if !utilfeature.DefaultFeatureGate.Enabled(features.GenericEphemeralVolume) && !csiInUse(oldPodSpec) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.GenericEphemeralVolume) && !ephemeralInUse(oldPodSpec) {
 		for i := range podSpec.Volumes {
 			podSpec.Volumes[i].Ephemeral = nil
 		}
 	}
+}
+
+func dropPodAffinityTermNamespaceSelector(terms []api.PodAffinityTerm) {
+	for i := range terms {
+		terms[i].NamespaceSelector = nil
+	}
+}
+
+func dropWeightedPodAffinityTermNamespaceSelector(terms []api.WeightedPodAffinityTerm) {
+	for i := range terms {
+		terms[i].PodAffinityTerm.NamespaceSelector = nil
+	}
+}
+
+// dropDisabledPodAffinityTermFields removes disabled fields from PodSpec related
+// to PodAffinityTerm only if it is not already used by the old spec
+func dropDisabledPodAffinityTermFields(podSpec, oldPodSpec *api.PodSpec) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.PodAffinityNamespaceSelector) &&
+		podSpec != nil && podSpec.Affinity != nil &&
+		!podAffinityNamespaceSelectorInUse(oldPodSpec) {
+		if podSpec.Affinity.PodAffinity != nil {
+			dropPodAffinityTermNamespaceSelector(podSpec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+			dropWeightedPodAffinityTermNamespaceSelector(podSpec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
+		}
+		if podSpec.Affinity.PodAntiAffinity != nil {
+			dropPodAffinityTermNamespaceSelector(podSpec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+			dropWeightedPodAffinityTermNamespaceSelector(podSpec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
+		}
+	}
+}
+
+func podAffinityNamespaceSelectorInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil || podSpec.Affinity == nil {
+		return false
+	}
+	if podSpec.Affinity.PodAffinity != nil {
+		for _, t := range podSpec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+			if t.NamespaceSelector != nil {
+				return true
+			}
+		}
+		for _, t := range podSpec.Affinity.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
+			if t.PodAffinityTerm.NamespaceSelector != nil {
+				return true
+			}
+		}
+	}
+	if podSpec.Affinity.PodAntiAffinity != nil {
+		for _, t := range podSpec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
+			if t.NamespaceSelector != nil {
+				return true
+			}
+		}
+		for _, t := range podSpec.Affinity.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
+			if t.PodAffinityTerm.NamespaceSelector == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func ephemeralContainersInUse(podSpec *api.PodSpec) bool {
@@ -705,6 +818,19 @@ func csiInUse(podSpec *api.PodSpec) bool {
 	}
 	for i := range podSpec.Volumes {
 		if podSpec.Volumes[i].CSI != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ephemeralInUse returns true if any pod's spec include inline CSI volumes.
+func ephemeralInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+	for i := range podSpec.Volumes {
+		if podSpec.Volumes[i].Ephemeral != nil {
 			return true
 		}
 	}

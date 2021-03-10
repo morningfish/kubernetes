@@ -80,7 +80,7 @@ func mustSetupScheduler() (util.ShutdownFunc, coreinformers.PodInformer, clients
 }
 
 // Returns the list of scheduled pods in the specified namespaces.
-// Note that no namespces specified matches all namespaces.
+// Note that no namespaces specified matches all namespaces.
 func getScheduledPods(podInformer coreinformers.PodInformer, namespaces ...string) ([]*v1.Pod, error) {
 	pods, err := podInformer.Lister().List(labels.Everything())
 	if err != nil {
@@ -256,12 +256,15 @@ func (tc *throughputCollector) run(ctx context.Context) {
 			}
 
 			scheduled := len(podsScheduled)
-			samplingRatioSeconds := float64(throughputSampleFrequency) / float64(time.Second)
-			throughput := float64(scheduled-lastScheduledCount) / samplingRatioSeconds
-			tc.schedulingThroughputs = append(tc.schedulingThroughputs, throughput)
-			lastScheduledCount = scheduled
+			// Only do sampling if number of scheduled pods is greater than zero
+			if scheduled > 0 {
+				samplingRatioSeconds := float64(throughputSampleFrequency) / float64(time.Second)
+				throughput := float64(scheduled-lastScheduledCount) / samplingRatioSeconds
+				tc.schedulingThroughputs = append(tc.schedulingThroughputs, throughput)
+				lastScheduledCount = scheduled
+				klog.Infof("%d pods scheduled", lastScheduledCount)
+			}
 
-			klog.Infof("%d pods scheduled", lastScheduledCount)
 		}
 	}
 }
