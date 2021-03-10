@@ -175,7 +175,7 @@ func WithBuildFrameworkCapturer(fc FrameworkCapturer) Option {
 var defaultSchedulerOptions = schedulerOptions{
 	profiles: []schedulerapi.KubeSchedulerProfile{
 		// Profiles' default plugins are set from the algorithm provider.
-		{SchedulerName: v1.DefaultSchedulerName},
+		{SchedulerName: v1.DefaultSchedulerName}, // 默认scheduler  default-scheduler
 	},
 	schedulerAlgorithmSource: schedulerapi.SchedulerAlgorithmSource{
 		Provider: defaultAlgorithmSourceProviderName(),
@@ -197,7 +197,7 @@ func New(client clientset.Interface,
 		stopEverything = wait.NeverStop
 	}
 
-	options := defaultSchedulerOptions
+	options := defaultSchedulerOptions //默认配置
 	for _, opt := range opts {
 		opt(&options)
 	}

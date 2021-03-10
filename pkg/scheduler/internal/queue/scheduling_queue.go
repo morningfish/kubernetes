@@ -241,8 +241,8 @@ func NewPriorityQueue(
 
 // Run starts the goroutine to pump from podBackoffQ to activeQ
 func (p *PriorityQueue) Run() {
-	go wait.Until(p.flushBackoffQCompleted, 1.0*time.Second, p.stop)
-	go wait.Until(p.flushUnschedulableQLeftover, 30*time.Second, p.stop)
+	go wait.Until(p.flushBackoffQCompleted, 1.0*time.Second, p.stop)     // 每秒执行一次
+	go wait.Until(p.flushUnschedulableQLeftover, 30*time.Second, p.stop) // 每30s执行一次
 }
 
 // Add adds a pod to the active queue. It should be called only when a new pod
@@ -332,7 +332,7 @@ func (p *PriorityQueue) flushBackoffQCompleted() {
 			return
 		}
 		pod := rawPodInfo.(*framework.QueuedPodInfo).Pod
-		boTime := p.getBackoffTime(rawPodInfo.(*framework.QueuedPodInfo))
+		boTime := p.getBackoffTime(rawPodInfo.(*framework.QueuedPodInfo)) // 下次应该调度的时间
 		if boTime.After(p.clock.Now()) {
 			return
 		}
@@ -361,7 +361,7 @@ func (p *PriorityQueue) flushUnschedulableQLeftover() {
 			podsToMove = append(podsToMove, pInfo)
 		}
 	}
-
+	// 超过 60s 移到 ActiveOrBackoffQueue
 	if len(podsToMove) > 0 {
 		p.movePodsToActiveOrBackoffQueue(podsToMove, UnschedulableTimeout)
 	}
