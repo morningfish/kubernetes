@@ -124,6 +124,7 @@ func runCommand(cmd *cobra.Command, opts *options.Options, registryOptions ...Op
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// 基础配置
 	cc, sched, err := Setup(ctx, opts, registryOptions...)
 	if err != nil {
 		return err
@@ -319,6 +320,7 @@ func Setup(ctx context.Context, opts *options.Options, outOfTreeRegistryOptions 
 	recorderFactory := getRecorderFactory(&cc)
 	completedProfiles := make([]kubeschedulerconfig.KubeSchedulerProfile, 0)
 	// Create the scheduler.
+	// 初始化scheduler
 	sched, err := scheduler.New(cc.Client,
 		cc.InformerFactory,
 		recorderFactory,

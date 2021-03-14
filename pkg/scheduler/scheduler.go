@@ -205,6 +205,7 @@ func New(client clientset.Interface,
 
 	schedulerCache := internalcache.New(30*time.Second, stopEverything)
 
+	// plugin 名字对应的初始化方法 map 形式
 	registry := frameworkplugins.NewInTreeRegistry()
 	if err := registry.Merge(options.frameworkOutOfTreeRegistry); err != nil {
 		return nil, err
@@ -241,7 +242,7 @@ func New(client clientset.Interface,
 			return nil, fmt.Errorf("couldn't create scheduler using provider %q: %v", *source.Provider, err)
 		}
 		sched = sc
-	case source.Policy != nil:
+	case source.Policy != nil: // 用户自定义算法
 		// Create the config from a user specified policy source.
 		policy := &schedulerapi.Policy{}
 		switch {
