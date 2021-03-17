@@ -58,14 +58,14 @@ func NewBaseHandler(c *componentbaseconfig.DebuggingConfiguration, checks ...hea
 	mux := mux.NewPathRecorderMux("controller-manager")
 	healthz.InstallHandler(mux, checks...)
 	if c.EnableProfiling {
-		routes.Profiling{}.Install(mux)
+		routes.Profiling{}.Install(mux) // pprof 性能监测
 		if c.EnableContentionProfiling {
-			goruntime.SetBlockProfileRate(1)
+			goruntime.SetBlockProfileRate(1) // 控制采样频率
 		}
 	}
-	configz.InstallHandler(mux)
+	configz.InstallHandler(mux) // configz 接口
 	//lint:ignore SA1019 See the Metrics Stability Migration KEP
-	mux.Handle("/metrics", legacyregistry.Handler())
+	mux.Handle("/metrics", legacyregistry.Handler()) // metrics 采集接口
 
 	return mux
 }
