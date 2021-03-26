@@ -233,7 +233,7 @@ func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error {
 
 	// No leader election, run directly
 	if !c.ComponentConfig.Generic.LeaderElection.LeaderElect {
-		run(context.TODO(), saTokenControllerInitFunc, NewControllerInitializers)
+		run(context.TODO(), saTokenControllerInitFunc, NewControllerInitializers) // NewControllerInitializers 所有的自带controller
 		panic("unreachable")
 	}
 
@@ -405,7 +405,7 @@ const (
 // paired to their InitFunc.  This allows for structured downstream composition and subdivision.
 func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc {
 	controllers := map[string]InitFunc{}
-	controllers["endpoint"] = startEndpointController
+	controllers["endpoint"] = startEndpointController // 监听 pod、service、endpoint，根据pod、service 的变化，修改endpoint
 	controllers["endpointslice"] = startEndpointSliceController
 	controllers["endpointslicemirroring"] = startEndpointSliceMirroringController
 	controllers["replicationcontroller"] = startReplicationController

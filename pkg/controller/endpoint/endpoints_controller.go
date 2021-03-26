@@ -199,7 +199,18 @@ func (e *Controller) Run(workers int, stopCh <-chan struct{}) {
 
 	go func() {
 		defer utilruntime.HandleCrash()
-		e.checkLeftoverEndpoints()
+		/*
+			这是为了防止在controller-manager发生重启时时，
+			用户删除了某些Services或者某些Endpoints还没删除干净，
+			Endpoints Controller没有处理的情况下，
+			在Endpoints Controller再次启动时能通过checkLeftoverEndpoints
+			检测到那些孤立的endpionts（没有对应services），
+			将虚构的Services重新加入到队列进行syncService操作，
+			从而完成这些孤立endpoint的清理工作。
+			上面提到的虚构Services其实是把Endpoints的Key(namespace/name)作为Services的Key，
+			因此这就是为什么要求Endpiont和Service的名字要一致的原因之一。
+		*/
+		e.checkLeftoverEndpoints() // 处理孤儿 ep， 如果service删了，ep存在，则删除
 	}()
 
 	<-stopCh
@@ -609,7 +620,7 @@ func (e *Controller) checkLeftoverEndpoints() {
 			utilruntime.HandleError(fmt.Errorf("Unable to get key for endpoint %#v", ep))
 			continue
 		}
-		e.queue.Add(key)
+		e.queue.Add(key) // 获取service并加到队列
 	}
 }
 
