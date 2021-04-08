@@ -405,9 +405,9 @@ const (
 // paired to their InitFunc.  This allows for structured downstream composition and subdivision.
 func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc {
 	controllers := map[string]InitFunc{}
-	controllers["endpoint"] = startEndpointController // 监听 pod、service、endpoint，根据pod、service 的变化，修改endpoint
-	controllers["endpointslice"] = startEndpointSliceController
-	controllers["endpointslicemirroring"] = startEndpointSliceMirroringController
+	controllers["endpoint"] = startEndpointController                             // 监听 pod、service、endpoint，根据pod、service 的变化，修改endpoint
+	controllers["endpointslice"] = startEndpointSliceController                   // 管理endpoint，防止单个endpoint过大
+	controllers["endpointslicemirroring"] = startEndpointSliceMirroringController // 转换 EndPoints 到 EndpointSlices
 	controllers["replicationcontroller"] = startReplicationController
 	controllers["podgc"] = startPodGCController
 	controllers["resourcequota"] = startResourceQuotaController

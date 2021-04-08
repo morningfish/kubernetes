@@ -93,7 +93,7 @@ func NewEndpointController(podInformer coreinformers.PodInformer, serviceInforme
 	}
 	e := &Controller{
 		client:           client,
-		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "endpoint"),
+		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "endpoint"), // 存放的是servie
 		workerLoopPeriod: time.Second,
 	}
 
