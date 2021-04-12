@@ -588,13 +588,13 @@ func (rsc *ReplicaSetController) manageReplicas(filteredPods []*v1.Pod, rs *apps
 			}
 		}
 		return err
-	} else if diff > 0 {
+	} else if diff > 0 { // 集群中实际存在的比期望值多
 		if diff > rsc.burstReplicas {
 			diff = rsc.burstReplicas
 		}
 		klog.V(2).InfoS("Too many replicas", "replicaSet", klog.KObj(rs), "need", *(rs.Spec.Replicas), "deleting", diff)
 
-		relatedPods, err := rsc.getIndirectlyRelatedPods(rs)
+		relatedPods, err := rsc.getIndirectlyRelatedPods(rs) // 属于 rs 的pod
 		utilruntime.HandleError(err)
 
 		// Choose which Pods to delete, preferring those in earlier phases of startup.
@@ -611,7 +611,7 @@ func (rsc *ReplicaSetController) manageReplicas(filteredPods []*v1.Pod, rs *apps
 		errCh := make(chan error, diff)
 		var wg sync.WaitGroup
 		wg.Add(diff)
-		for _, pod := range podsToDelete {
+		for _, pod := range podsToDelete { // 删除pod
 			go func(targetPod *v1.Pod) {
 				defer wg.Done()
 				if err := rsc.podControl.DeletePod(rs.Namespace, targetPod.Name, rs); err != nil {
@@ -653,7 +653,7 @@ func (rsc *ReplicaSetController) syncReplicaSet(key string) error {
 	if err != nil {
 		return err
 	}
-	rs, err := rsc.rsLister.ReplicaSets(namespace).Get(name)
+	rs, err := rsc.rsLister.ReplicaSets(namespace).Get(name) // 获取rs
 	if apierrors.IsNotFound(err) {
 		klog.V(4).Infof("%v %v has been deleted", rsc.Kind, key)
 		rsc.expectations.DeleteExpectations(key)
@@ -663,7 +663,7 @@ func (rsc *ReplicaSetController) syncReplicaSet(key string) error {
 		return err
 	}
 
-	rsNeedsSync := rsc.expectations.SatisfiedExpectations(key)
+	rsNeedsSync := rsc.expectations.SatisfiedExpectations(key) //判断是否需要执行真正的 sync 操作
 	selector, err := metav1.LabelSelectorAsSelector(rs.Spec.Selector)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("error converting pod selector to selector: %v", err))
@@ -677,11 +677,12 @@ func (rsc *ReplicaSetController) syncReplicaSet(key string) error {
 	if err != nil {
 		return err
 	}
-	// Ignore inactive pods.
+	// Ignore inactive pods. 根据pod 的status 过滤正常的
 	filteredPods := controller.FilterActivePods(allPods)
 
 	// NOTE: filteredPods are pointing to objects from cache - if you need to
 	// modify them, you need to copy it first.
+	// 检查所有 pod，根据 pod 并进行 adopt 与 release 操作，最后获取与该 rs 关联的 pod list
 	filteredPods, err = rsc.claimPods(rs, selector, filteredPods)
 	if err != nil {
 		return err
@@ -801,7 +802,7 @@ func getPodsToDelete(filteredPods, relatedPods []*v1.Pod, diff int) []*v1.Pod {
 	// No need to sort pods if we are about to delete all of them.
 	// diff will always be <= len(filteredPods), so not need to handle > case.
 	if diff < len(filteredPods) {
-		podsWithRanks := getPodsRankedByRelatedPodsOnSameNode(filteredPods, relatedPods)
+		podsWithRanks := getPodsRankedByRelatedPodsOnSameNode(filteredPods, relatedPods) // 排序队列
 		sort.Sort(podsWithRanks)
 	}
 	return filteredPods[:diff]
