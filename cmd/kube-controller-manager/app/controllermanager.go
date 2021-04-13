@@ -408,8 +408,8 @@ func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc 
 	controllers["endpoint"] = startEndpointController                             // 监听 pod、service、endpoint，根据pod、service 的变化，修改endpoint
 	controllers["endpointslice"] = startEndpointSliceController                   // 管理endpoint，防止单个endpoint过大
 	controllers["endpointslicemirroring"] = startEndpointSliceMirroringController // 转换 EndPoints 到 EndpointSlices
-	controllers["replicationcontroller"] = startReplicationController
-	controllers["podgc"] = startPodGCController
+	controllers["replicationcontroller"] = startReplicationController             // rs controller 控制pod数量
+	controllers["podgc"] = startPodGCController                                   // 处理垃圾pod
 	controllers["resourcequota"] = startResourceQuotaController
 	controllers["namespace"] = startNamespaceController
 	controllers["serviceaccount"] = startServiceAccountController

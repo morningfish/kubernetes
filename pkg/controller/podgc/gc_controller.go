@@ -94,7 +94,7 @@ func (gcc *PodGCController) Run(stop <-chan struct{}) {
 		return
 	}
 
-	go wait.Until(gcc.gc, gcCheckPeriod, stop)
+	go wait.Until(gcc.gc, gcCheckPeriod, stop) // 20s 执行一次
 
 	<-stop
 }
@@ -111,10 +111,10 @@ func (gcc *PodGCController) gc() {
 		return
 	}
 	if gcc.terminatedPodThreshold > 0 {
-		gcc.gcTerminated(pods)
+		gcc.gcTerminated(pods) // 清理超出terminated阈值的terminated pod
 	}
-	gcc.gcOrphaned(pods, nodes)
-	gcc.gcUnscheduledTerminating(pods)
+	gcc.gcOrphaned(pods, nodes)        // 清理孤儿pod，bind了不存在的node的pod
+	gcc.gcUnscheduledTerminating(pods) // 删除那些terminating并且还没调度到某个node的pods
 }
 
 func isPodTerminated(pod *v1.Pod) bool {
@@ -141,7 +141,7 @@ func (gcc *PodGCController) gcTerminated(pods []*v1.Pod) {
 
 	klog.Infof("garbage collecting %v pods", deleteCount)
 	// sort only when necessary
-	sort.Sort(byCreationTimestamp(terminatedPods))
+	sort.Sort(byCreationTimestamp(terminatedPods)) // 按照创建时间排序，删除最早的；时间相同，按照名称排序
 	var wait sync.WaitGroup
 	for i := 0; i < deleteCount; i++ {
 		wait.Add(1)
@@ -166,10 +166,10 @@ func (gcc *PodGCController) gcOrphaned(pods []*v1.Pod, nodes []*v1.Node) {
 	// Add newly found unknown nodes to quarantine
 	for _, pod := range pods {
 		if pod.Spec.NodeName != "" && !existingNodeNames.Has(pod.Spec.NodeName) {
-			gcc.nodeQueue.AddAfter(pod.Spec.NodeName, quarantineTime)
+			gcc.nodeQueue.AddAfter(pod.Spec.NodeName, quarantineTime) // 不存在node 的pod 绑定 加入延迟队列，40s后处理
 		}
 	}
-	// Check if nodes are still missing after quarantine period
+	// Check if nodes are still missing after quarantine period 检查漏掉的node
 	deletedNodesNames, quit := gcc.discoverDeletedNodes(existingNodeNames)
 	if quit {
 		return
@@ -197,7 +197,7 @@ func (gcc *PodGCController) discoverDeletedNodes(existingNodeNames sets.String) 
 		}
 		nodeName := item.(string)
 		if !existingNodeNames.Has(nodeName) {
-			exists, err := gcc.checkIfNodeExists(nodeName)
+			exists, err := gcc.checkIfNodeExists(nodeName) // 检查node节点是否在集群中存在
 			switch {
 			case err != nil:
 				klog.Errorf("Error while getting node %q: %v", nodeName, err)
@@ -224,7 +224,7 @@ func (gcc *PodGCController) gcUnscheduledTerminating(pods []*v1.Pod) {
 	klog.V(4).Infof("GC'ing unscheduled pods which are terminating.")
 
 	for _, pod := range pods {
-		if pod.DeletionTimestamp == nil || len(pod.Spec.NodeName) > 0 {
+		if pod.DeletionTimestamp == nil || len(pod.Spec.NodeName) > 0 { // 非删除状态pod
 			continue
 		}
 
