@@ -467,9 +467,10 @@ func startResourceQuotaController(ctx ControllerContext) (http.Handler, bool, er
 	if err != nil {
 		return nil, false, err
 	}
+	// 执行主函数
 	go resourceQuotaController.Run(int(ctx.ComponentConfig.ResourceQuotaController.ConcurrentResourceQuotaSyncs), ctx.Stop)
 
-	// Periodically the quota controller to detect new resource types
+	// Periodically the quota controller to detect new resource types 30s 检测一次
 	go resourceQuotaController.Sync(discoveryFunc, 30*time.Second, ctx.Stop)
 
 	return nil, true, nil

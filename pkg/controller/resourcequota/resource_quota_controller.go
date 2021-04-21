@@ -25,7 +25,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -189,7 +189,7 @@ func (rq *Controller) enqueueAll() {
 			utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", rqs[i], err))
 			continue
 		}
-		rq.queue.Add(key)
+		rq.queue.Add(key) //加入队列，通过sync 进行处理
 	}
 }
 
@@ -283,7 +283,7 @@ func (rq *Controller) Run(workers int, stopCh <-chan struct{}) {
 
 	// the workers that chug through the quota calculation backlog
 	for i := 0; i < workers; i++ {
-		go wait.Until(rq.worker(rq.queue), time.Second, stopCh)
+		go wait.Until(rq.worker(rq.queue), time.Second, stopCh) // 全量处理
 		go wait.Until(rq.worker(rq.missingUsageQueue), time.Second, stopCh)
 	}
 	// the timer for how often we do a full recalculation across all quotas
