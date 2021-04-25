@@ -173,8 +173,9 @@ function config-ip-firewall {
   # node because we don't expect the daemonset to run on this node.
   if [[ "${ENABLE_METADATA_CONCEALMENT:-}" == "true" ]] && [[ ! "${METADATA_CONCEALMENT_NO_FIREWALL:-}" == "true" ]]; then
     echo "Add rule for metadata concealment"
-    iptables -w -t nat -I PREROUTING -p tcp ! -i eth0 -d "${METADATA_SERVER_IP}" --dport 80 -m comment --comment "metadata-concealment: bridge traffic to metadata server goes to metadata proxy" -j REDIRECT --to-ports 988
-    iptables -w -t nat -I PREROUTING -p tcp ! -i eth0 -d "${METADATA_SERVER_IP}" --dport 8080 -m comment --comment "metadata-concealment: bridge traffic to metadata server goes to metadata proxy" -j REDIRECT --to-ports 987
+    ip addr add dev lo 169.254.169.252/32
+    iptables -w -t nat -I PREROUTING -p tcp ! -i eth0 -d "${METADATA_SERVER_IP}" --dport 80 -m comment --comment "metadata-concealment: bridge traffic to metadata server goes to metadata proxy" -j DNAT --to-destination 169.254.169.252:988
+    iptables -w -t nat -I PREROUTING -p tcp ! -i eth0 -d "${METADATA_SERVER_IP}" --dport 8080 -m comment --comment "metadata-concealment: bridge traffic to metadata server goes to metadata proxy" -j DNAT --to-destination 169.254.169.252:987
   fi
   iptables -w -t mangle -I OUTPUT -s 169.254.169.254 -j DROP
 
@@ -818,6 +819,12 @@ EOF
     use_cloud_config="true"
     cat <<EOF >>/etc/gce.conf
 network-project-id = ${NETWORK_PROJECT_ID}
+EOF
+  fi
+  if [[ -n "${STACK_TYPE:-}" ]]; then
+    use_cloud_config="true"
+    cat <<EOF >>/etc/gce.conf
+stack-type = ${STACK_TYPE}
 EOF
   fi
   if [[ -n "${NODE_NETWORK:-}" ]]; then
@@ -1774,7 +1781,7 @@ function start-kube-proxy {
 # $5: pod name, which should be either etcd or etcd-events
 function prepare-etcd-manifest {
   local host_name=${ETCD_HOSTNAME:-$(hostname -s)}
-  local -r host_ip=$(${PYTHON} -c "import socket;print(socket.gethostbyname(\"${host_name}\"))")
+  local -r host_ip=$(python3 -c "import socket;print(socket.gethostbyname(\"${host_name}\"))")
   local etcd_cluster=""
   local cluster_state="new"
   local etcd_protocol="http"
@@ -3280,24 +3287,6 @@ function main() {
   KUBE_BIN=${KUBE_HOME}/bin
   CONTAINERIZED_MOUNTER_HOME="${KUBE_HOME}/containerized_mounter"
   PV_RECYCLER_OVERRIDE_TEMPLATE="${KUBE_HOME}/kube-manifests/kubernetes/pv-recycler-template.yaml"
-
-  log-start 'SetPythonVersion'
-  if [[ "$(python -V 2>&1)" =~ "Python 2" ]]; then
-    # found python2, just use that
-    PYTHON="python"
-  elif [[ -f "/usr/bin/python2.7" ]]; then
-    # System python not defaulted to python 2 but using 2.7 during migration
-    PYTHON="/usr/bin/python2.7"
-  else
-    # No python2 either by default, let's see if we can find python3
-    PYTHON="python3"
-    if ! command -v ${PYTHON} >/dev/null 2>&1; then
-      echo "ERROR Python not found. Aborting."
-      exit 2
-    fi
-  fi
-  echo "Version :  $(${PYTHON} -V 2>&1)"
-  log-end 'SetPythonVersion'
 
   log-start 'SourceKubeEnv'
   if [[ ! -e "${KUBE_HOME}/kube-env" ]]; then
