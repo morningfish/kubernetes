@@ -402,10 +402,10 @@ func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc 
 	controllers["endpointslicemirroring"] = startEndpointSliceMirroringController // 转换 EndPoints 到 EndpointSlices
 	controllers["replicationcontroller"] = startReplicationController             // rs controller 控制pod数量
 	controllers["podgc"] = startPodGCController                                   // 处理垃圾pod
-	controllers["resourcequota"] = startResourceQuotaController
-	controllers["namespace"] = startNamespaceController
-	controllers["serviceaccount"] = startServiceAccountController
-	controllers["garbagecollector"] = startGarbageCollectorController
+	controllers["resourcequota"] = startResourceQuotaController                   // 资源 quota
+	controllers["namespace"] = startNamespaceController                           // ns
+	controllers["serviceaccount"] = startServiceAccountController                 // service account
+	controllers["garbagecollector"] = startGarbageCollectorController             // gc
 	controllers["daemonset"] = startDaemonSetController
 	controllers["job"] = startJobController
 	controllers["deployment"] = startDeploymentController
