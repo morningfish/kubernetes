@@ -141,7 +141,7 @@ type Controller struct {
 	// serviceLister is able to list/get services and is populated by the shared informer passed to
 	// NewEndpointController.
 	serviceLister corelisters.ServiceLister
-	// servicesSynced returns true if the service shared informer has been synced at least once.
+	// servicesSynced returns true if thexservice shared informer has been synced at least once.
 	// Added as a member to the struct to allow injection for testing.
 	servicesSynced cache.InformerSynced
 
