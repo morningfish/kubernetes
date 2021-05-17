@@ -1367,6 +1367,9 @@ KUBE_PKI_READERS_GROUP: 2005
 ETCD_RUNASUSER: 2006
 ETCD_RUNASGROUP: 2006
 KUBE_POD_LOG_READERS_GROUP: 2007
+KONNECTIVITY_SERVER_RUNASUSER: 2008
+KONNECTIVITY_SERVER_RUNASGROUP: 2008
+KONNECTIVITY_SERVER_SOCKET_WRITER_GROUP: 2008
 EOF
     # KUBE_APISERVER_REQUEST_TIMEOUT_SEC (if set) controls the --request-timeout
     # flag
@@ -1911,7 +1914,7 @@ function update-or-verify-gcloud() {
   else
     local version
     version=$(gcloud version --format=json)
-    python -c"
+    python3 -c"
 import json,sys
 from distutils import version
 

@@ -23,7 +23,10 @@ limitations under the License.
 // This version improves on the v1beta2 format by fixing some minor issues and adding a few new fields.
 //
 // A list of changes since v1beta2:
-//	- TODO
+// - The deprecated "ClusterConfiguration.useHyperKubeImage" field has been removed.
+// Kubeadm no longer supports the hyperkube image.
+// - The "ClusterConfiguration.DNS.Type" field has been removed since CoreDNS is the only supported
+// DNS server type by kubeadm.
 //
 // Migration from old kubeadm config versions
 //
@@ -233,7 +236,6 @@ limitations under the License.
 // 	    pathType: File
 // 	certificatesDir: "/etc/kubernetes/pki"
 // 	imageRepository: "k8s.gcr.io"
-// 	useHyperKubeImage: false
 // 	clusterName: "example-cluster"
 // 	---
 // 	apiVersion: kubelet.config.k8s.io/v1beta1

@@ -28,6 +28,9 @@ set -o pipefail
 ### Hardcoded constants
 METADATA_SERVER_IP="${METADATA_SERVER_IP:-169.254.169.254}"
 
+# Standard curl flags.
+CURL_FLAGS='--fail --silent --show-error --retry 5 --retry-delay 3 --connect-timeout 10 --retry-connrefused'
+
 function convert-manifest-params {
   # A helper function to convert the manifest args from a string to a list of
   # flag arguments.
@@ -1935,6 +1938,26 @@ function prepare-konnectivity-server-manifest {
   sed -i -e "s@{{ *health_port *}}@$2@g" "${temp_file}"
   sed -i -e "s@{{ *admin_port *}}@$3@g" "${temp_file}"
   sed -i -e "s@{{ *liveness_probe_initial_delay *}}@30@g" "${temp_file}"
+  if [[ -n "${KONNECTIVITY_SERVER_RUNASUSER:-}" && -n "${KONNECTIVITY_SERVER_RUNASGROUP:-}" && -n "${KONNECTIVITY_SERVER_SOCKET_WRITER_GROUP:-}" ]]; then
+    sed -i -e "s@{{ *run_as_user *}}@runAsUser: ${KONNECTIVITY_SERVER_RUNASUSER}@g" "${temp_file}"
+    sed -i -e "s@{{ *run_as_group *}}@runAsGroup: ${KONNECTIVITY_SERVER_RUNASGROUP}@g" "${temp_file}"
+    sed -i -e "s@{{ *supplemental_groups *}}@supplementalGroups: [${KUBE_PKI_READERS_GROUP}]@g" "${temp_file}"
+    sed -i -e "s@{{ *container_security_context *}}@securityContext:@g" "${temp_file}"
+    sed -i -e "s@{{ *capabilities *}}@capabilities:@g" "${temp_file}"
+    sed -i -e "s@{{ *drop_capabilities *}}@drop: [ ALL ]@g" "${temp_file}"
+    sed -i -e "s@{{ *disallow_privilege_escalation *}}@allowPrivilegeEscalation: false@g" "${temp_file}"
+    mkdir -p /etc/srv/kubernetes/konnectivity-server/
+    chown -R "${KONNECTIVITY_SERVER_RUNASUSER}":"${KONNECTIVITY_SERVER_RUNASGROUP}" /etc/srv/kubernetes/konnectivity-server
+    chmod g+w /etc/srv/kubernetes/konnectivity-server
+  else
+    sed -i -e "s@{{ *run_as_user *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *run_as_group *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *supplemental_groups *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *container_security_context *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *capabilities *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *drop_capabilities *}}@@g" "${temp_file}"
+    sed -i -e "s@{{ *disallow_privilege_escalation *}}@@g" "${temp_file}"
+  fi
   mv "${temp_file}" /etc/kubernetes/manifests
 }
 
@@ -1943,7 +1966,7 @@ function prepare-konnectivity-server-manifest {
 # in the manifests, and copies them to /etc/kubernetes/manifests.
 function start-konnectivity-server {
   echo "Start konnectivity server pods"
-  prepare-log-file /var/log/konnectivity-server.log
+  prepare-log-file /var/log/konnectivity-server.log "${KONNECTIVITY_SERVER_RUNASUSER:-0}"
   prepare-konnectivity-server-manifest "8132" "8133" "8134"
 }
 
@@ -2278,14 +2301,10 @@ function download-extra-addons {
 
   mkdir -p "${out_dir}"
 
+  # shellcheck disable=SC2206
   local curl_cmd=(
     "curl"
-    "--fail"
-    "--retry" "5"
-    "--retry-delay" "3"
-    "--silent"
-    "--show-error"
-    "--retry-connrefused"
+    ${CURL_FLAGS}
   )
   if [[ -n "${EXTRA_ADDONS_HEADER:-}" ]]; then
     curl_cmd+=("-H" "${EXTRA_ADDONS_HEADER}")
@@ -2307,14 +2326,10 @@ function get-metadata-value {
   local default="${2:-}"
 
   local status
-  curl \
-      --retry 5 \
-      --retry-delay 3 \
-      --retry-connrefused \
-      --fail \
-      --silent \
-      -H 'Metadata-Flavor: Google' \
-      "http://metadata/computeMetadata/v1/${1}" \
+  # shellcheck disable=SC2086
+  curl ${CURL_FLAGS} \
+    -H 'Metadata-Flavor: Google' \
+    "http://metadata/computeMetadata/v1/${1}" \
   || status="$?"
   status="${status:-0}"
 
@@ -3158,7 +3173,7 @@ function log-trap-pop {
 function log-error {
   local bootstep="$1"
 
-  log-proto "${bootstep}" "${LOG_STATUS_ERROR}" "error calling '${BASH_COMMAND}'"
+  log-proto "${bootstep}" "${LOG_STATUS_ERROR}" "encountered non-zero exit code"
 }
 
 # Wraps a command with bootstrap logging.
