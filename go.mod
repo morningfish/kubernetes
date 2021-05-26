@@ -74,6 +74,7 @@ require (
 	github.com/opencontainers/selinux v1.8.0
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0
+	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/client_model v0.2.0
 	github.com/prometheus/common v0.10.0
 	github.com/quobyte/api v0.1.8
@@ -517,7 +518,7 @@ replace (
 	rsc.io/pdf => rsc.io/pdf v0.1.1
 	rsc.io/quote/v3 => rsc.io/quote/v3 v3.1.0
 	rsc.io/sampler => rsc.io/sampler v1.3.0
-	sigs.k8s.io/apiserver-network-proxy/konnectivity-client => sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.15
+	sigs.k8s.io/apiserver-network-proxy/konnectivity-client => sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.0.19
 	sigs.k8s.io/kustomize/api => sigs.k8s.io/kustomize/api v0.8.10
 	sigs.k8s.io/kustomize/cmd/config => sigs.k8s.io/kustomize/cmd/config v0.9.12
 	sigs.k8s.io/kustomize/kustomize/v4 => sigs.k8s.io/kustomize/kustomize/v4 v4.1.3
