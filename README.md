@@ -1,4 +1,4 @@
-# Kubernetes (K8s)
+# Kubernetes (K8s) 中文注释版，帮助大家理解k8s源码
 
 [![GoPkg Widget]][GoPkg] [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/569/badge)](https://bestpractices.coreinfrastructure.org/projects/569)
 
