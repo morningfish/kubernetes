@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/feature"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/names"
 )
 
 // BalancedAllocation is a score plugin that calculates the difference between the cpu and memory fraction
@@ -37,7 +38,7 @@ type BalancedAllocation struct {
 var _ = framework.ScorePlugin(&BalancedAllocation{})
 
 // BalancedAllocationName is the name of the plugin used in the plugin registry and configurations.
-const BalancedAllocationName = "NodeResourcesBalancedAllocation"
+const BalancedAllocationName = names.NodeResourcesBalancedAllocation
 
 // Name returns name of the plugin. It is used in logs, etc.
 func (ba *BalancedAllocation) Name() string {
@@ -81,12 +82,16 @@ func NewBalancedAllocation(_ runtime.Object, h framework.Handle, fts feature.Fea
 
 // todo: use resource weights in the scorer function
 func balancedResourceScorer(requested, allocable resourceToValueMap, includeVolumes bool, requestedVolumes int, allocatableVolumes int) int64 {
+	// This to find a node which has most balanced CPU, memory and volume usage.
 	cpuFraction := fractionOfCapacity(requested[v1.ResourceCPU], allocable[v1.ResourceCPU])
 	memoryFraction := fractionOfCapacity(requested[v1.ResourceMemory], allocable[v1.ResourceMemory])
-	// This to find a node which has most balanced CPU, memory and volume usage.
-	if cpuFraction >= 1 || memoryFraction >= 1 {
-		// if requested >= capacity, the corresponding host should never be preferred.
-		return 0
+	// fractions might be greater than 1 because pods with no requests get minimum
+	// values.
+	if cpuFraction > 1 {
+		cpuFraction = 1
+	}
+	if memoryFraction > 1 {
+		memoryFraction = 1
 	}
 
 	// includeVolumes is only true when BalanceAttachedNodeVolumes feature gate is enabled (see resource_allocation.go#score())

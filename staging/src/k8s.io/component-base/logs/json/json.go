@@ -17,7 +17,6 @@ limitations under the License.
 package logs
 
 import (
-	"os"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -35,6 +34,49 @@ var (
 	timeNow = time.Now
 )
 
+func init() {
+	JSONLogger = NewJSONLogger(nil)
+}
+
+// NewJSONLogger creates a new json logr.Logger using the given Zap Logger to log.
+func NewJSONLogger(w zapcore.WriteSyncer) logr.Logger {
+	l, _ := zapConfig.Build()
+	l = l.WithOptions(zap.AddCallerSkip(1))
+	if w != nil {
+		l = l.WithOptions(zap.WrapCore(
+			func(zapcore.Core) zapcore.Core {
+				return zapcore.NewCore(zapcore.NewJSONEncoder(zapConfig.EncoderConfig), zapcore.AddSync(w), zapcore.DebugLevel)
+			}))
+	}
+	return &zapLogger{l: l}
+}
+
+var zapConfig = zap.Config{
+	Level:       zap.NewAtomicLevelAt(zap.DebugLevel),
+	Development: false,
+	Sampling:    nil,
+	Encoding:    "json",
+	EncoderConfig: zapcore.EncoderConfig{
+		MessageKey: "msg",
+
+		CallerKey:      "caller",
+		TimeKey:        "ts",
+		EncodeTime:     epochMillisTimeEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	},
+	OutputPaths:      []string{"stdout"},
+	ErrorOutputPaths: []string{"stderr"},
+}
+
+// this has the same implementation as zapcore.EpochMillisTimeEncoder but
+// uses timeNow() which is stubbed out for testing purposes.
+func epochMillisTimeEncoder(_ time.Time, enc zapcore.PrimitiveArrayEncoder) {
+	nanos := timeNow().UnixNano()
+	millis := float64(nanos) / float64(time.Millisecond)
+	enc.AppendFloat64(millis)
+}
+
 // zapLogger is a logr.Logger that uses Zap to record log.
 type zapLogger struct {
 	// NB: this looks very similar to zap.SugaredLogger, but
@@ -43,7 +85,7 @@ type zapLogger struct {
 	lvl int
 }
 
-// implement logr.Logger
+// zapLogger implement logr.Logger
 var _ logr.Logger = &zapLogger{}
 
 // Enabled should always return true
@@ -53,25 +95,17 @@ func (l *zapLogger) Enabled() bool {
 
 // Info write message to error level log
 func (l *zapLogger) Info(msg string, keysAndVals ...interface{}) {
-	entry := zapcore.Entry{
-		Time:    timeNow(),
-		Message: msg,
+	if checkedEntry := l.l.Check(zapcore.InfoLevel, msg); checkedEntry != nil {
+		checkedEntry.Write(l.handleFields(keysAndVals)...)
 	}
-	checkedEntry := l.l.Core().Check(entry, nil)
-	checkedEntry.Write(l.handleFields(keysAndVals)...)
 }
 
-// dPanic write message to DPanicLevel level log
-// we need implement this because unit test case need stub time.Now
-// otherwise the ts field always changed
+// dPanic write message to DPanicLevel level log we need implement this because we need
+// to have the "v" field as well.
 func (l *zapLogger) dPanic(msg string) {
-	entry := zapcore.Entry{
-		Level:   zapcore.DPanicLevel,
-		Time:    timeNow(),
-		Message: msg,
+	if checkedEntry := l.l.Check(zapcore.DPanicLevel, msg); checkedEntry != nil {
+		checkedEntry.Write(zap.Int("v", l.lvl))
 	}
-	checkedEntry := l.l.Core().Check(entry, nil)
-	checkedEntry.Write(zap.Int("v", l.lvl))
 }
 
 // handleFields converts a bunch of arbitrary key-value pairs into Zap fields.  It takes
@@ -115,13 +149,13 @@ func (l *zapLogger) handleFields(args []interface{}, additional ...zap.Field) []
 
 // Error write log message to error level
 func (l *zapLogger) Error(err error, msg string, keysAndVals ...interface{}) {
-	entry := zapcore.Entry{
-		Level:   zapcore.ErrorLevel,
-		Time:    timeNow(),
-		Message: msg,
+	if checkedEntry := l.l.Check(zap.ErrorLevel, msg); checkedEntry != nil {
+		checkedEntry.Write(l.handleFields(keysAndVals, handleError(err))...)
 	}
-	checkedEntry := l.l.Core().Check(entry, nil)
-	checkedEntry.Write(l.handleFields(keysAndVals, handleError(err))...)
+}
+
+func handleError(err error) zap.Field {
+	return zap.NamedError("err", err)
 }
 
 // V return info logr.Logger  with specified level
@@ -144,35 +178,17 @@ func (l *zapLogger) WithName(name string) logr.Logger {
 	return l
 }
 
-// encoderConfig config zap encodetime format
-var encoderConfig = zapcore.EncoderConfig{
-	MessageKey: "msg",
-
-	TimeKey:        "ts",
-	EncodeTime:     zapcore.EpochMillisTimeEncoder,
-	EncodeDuration: zapcore.StringDurationEncoder,
+func (l *zapLogger) WithCallDepth(depth int) logr.Logger {
+	return l.newLoggerWithExtraSkip(depth)
 }
 
-// NewJSONLogger creates a new json logr.Logger using the given Zap Logger to log.
-func NewJSONLogger(w zapcore.WriteSyncer) logr.Logger {
-	l, _ := zap.NewProduction()
-	if w == nil {
-		w = os.Stdout
-	}
-	log := l.WithOptions(zap.AddCallerSkip(1),
-		zap.WrapCore(
-			func(zapcore.Core) zapcore.Core {
-				return zapcore.NewCore(zapcore.NewJSONEncoder(encoderConfig), zapcore.AddSync(w), zapcore.DebugLevel)
-			}))
+// newLoggerWithExtraSkip allows creation of loggers with variable levels of callstack skipping
+func (l *zapLogger) newLoggerWithExtraSkip(callerSkip int) logr.Logger {
+	log := l.l.WithOptions(zap.AddCallerSkip(callerSkip))
 	return &zapLogger{
-		l: log,
+		l:   log,
+		lvl: l.lvl,
 	}
 }
 
-func handleError(err error) zap.Field {
-	return zap.NamedError("err", err)
-}
-
-func init() {
-	JSONLogger = NewJSONLogger(nil)
-}
+var _ logr.CallDepthLogger = &zapLogger{}
