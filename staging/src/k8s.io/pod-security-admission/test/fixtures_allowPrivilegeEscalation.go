@@ -34,10 +34,8 @@ containerFields: []string{
 func init() {
 	fixtureData_1_8 := fixtureGenerator{
 		generatePass: func(p *corev1.Pod) []*corev1.Pod {
-			return []*corev1.Pod{
-				// only valid pod is to explicitly set allowPrivilegeEscalation to false in all containers
-				p,
-			}
+			// minimal valid pod already captures all valid combinations
+			return nil
 		},
 		generateFail: func(p *corev1.Pod) []*corev1.Pod {
 			return []*corev1.Pod{
@@ -45,15 +43,14 @@ func init() {
 				tweak(p, func(p *corev1.Pod) {
 					p.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation = pointer.BoolPtr(true)
 				}),
+				// ensure initContainers are checked
 				tweak(p, func(p *corev1.Pod) {
 					p.Spec.InitContainers[0].SecurityContext.AllowPrivilegeEscalation = pointer.BoolPtr(true)
 				}),
 				// nil AllowPrivilegeEscalation
 				tweak(p, func(p *corev1.Pod) { p.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation = nil }),
-				tweak(p, func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext.AllowPrivilegeEscalation = nil }),
 				// nil security context
 				tweak(p, func(p *corev1.Pod) { p.Spec.Containers[0].SecurityContext = nil }),
-				tweak(p, func(p *corev1.Pod) { p.Spec.InitContainers[0].SecurityContext = nil }),
 			}
 		},
 	}

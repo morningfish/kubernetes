@@ -48,6 +48,8 @@ func MakeService(name string, tweaks ...Tweak) *api.Service {
 	SetTypeClusterIP(svc)
 	// Default to 1 port
 	SetPorts(MakeServicePort("", 93, intstr.FromInt(76), api.ProtocolTCP))(svc)
+	// Default internalTrafficPolicy to "Cluster"
+	SetInternalTrafficPolicy(api.ServiceInternalTrafficPolicyCluster)(svc)
 
 	for _, tweak := range tweaks {
 		tweak(svc)
@@ -64,6 +66,7 @@ func SetTypeClusterIP(svc *api.Service) {
 	}
 	svc.Spec.ExternalName = ""
 	svc.Spec.ExternalTrafficPolicy = ""
+	svc.Spec.AllocateLoadBalancerNodePorts = nil
 }
 
 // SetTypeNodePort sets the service type to NodePort and clears other fields.
@@ -71,12 +74,14 @@ func SetTypeNodePort(svc *api.Service) {
 	svc.Spec.Type = api.ServiceTypeNodePort
 	svc.Spec.ExternalTrafficPolicy = api.ServiceExternalTrafficPolicyTypeCluster
 	svc.Spec.ExternalName = ""
+	svc.Spec.AllocateLoadBalancerNodePorts = nil
 }
 
 // SetTypeLoadBalancer sets the service type to LoadBalancer and clears other fields.
 func SetTypeLoadBalancer(svc *api.Service) {
 	svc.Spec.Type = api.ServiceTypeLoadBalancer
 	svc.Spec.ExternalTrafficPolicy = api.ServiceExternalTrafficPolicyTypeCluster
+	svc.Spec.AllocateLoadBalancerNodePorts = utilpointer.BoolPtr(true)
 	svc.Spec.ExternalName = ""
 }
 
@@ -87,16 +92,7 @@ func SetTypeExternalName(svc *api.Service) {
 	svc.Spec.ExternalTrafficPolicy = ""
 	svc.Spec.ClusterIP = ""
 	svc.Spec.ClusterIPs = nil
-}
-
-// SetTypeExternalNameTrue sets the allocate LB node port to true.
-func SetAllocateLBNodePortTrue(svc *api.Service) {
-	svc.Spec.AllocateLoadBalancerNodePorts = utilpointer.BoolPtr(true)
-}
-
-// SetTypeExternalNameFalse sets the allocate LB node port to false.
-func SetAllocateLBNodePortFalse(svc *api.Service) {
-	svc.Spec.AllocateLoadBalancerNodePorts = utilpointer.BoolPtr(false)
+	svc.Spec.AllocateLoadBalancerNodePorts = nil
 }
 
 // SetPorts sets the service ports list.
@@ -149,5 +145,26 @@ func SetNodePorts(values ...int) Tweak {
 			}
 			svc.Spec.Ports[i].NodePort = int32(values[i])
 		}
+	}
+}
+
+// SetInternalTrafficPolicy sets the internalTrafficPolicy field for a Service.
+func SetInternalTrafficPolicy(policy api.ServiceInternalTrafficPolicyType) Tweak {
+	return func(svc *api.Service) {
+		svc.Spec.InternalTrafficPolicy = &policy
+	}
+}
+
+// SetExternalTrafficPolicy sets the externalTrafficPolicy field for a Service.
+func SetExternalTrafficPolicy(policy api.ServiceExternalTrafficPolicyType) Tweak {
+	return func(svc *api.Service) {
+		svc.Spec.ExternalTrafficPolicy = policy
+	}
+}
+
+// SetAllocateLoadBalancerNodePorts sets the allocate LB node port field.
+func SetAllocateLoadBalancerNodePorts(val bool) Tweak {
+	return func(svc *api.Service) {
+		svc.Spec.AllocateLoadBalancerNodePorts = utilpointer.BoolPtr(val)
 	}
 }
